@@ -50,6 +50,7 @@ html, body {
 #cameraPreview {
     width: 100%;
     border-radius: 10px;
+    transform: scaleX(-1); /* mirror for front cam */
 }
 
 #overlay {
@@ -83,13 +84,17 @@ html, body {
 <div class="card">
 
 <h4 class="mb-2">PhotoDescribe — Live Object Detection</h4>
-<p class="text-muted mb-3">
-Camera opens automatically. Objects are detected live.
-</p>
+<p class="text-muted mb-2">Auto camera • Live AI • Front & Back camera</p>
 
-<div class="form-check mb-2">
-    <input class="form-check-input" type="checkbox" id="ttsToggle" checked>
-    <label class="form-check-label">Speak detected objects</label>
+<div class="d-flex align-items-center gap-3 mb-2">
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="ttsToggle" checked>
+        <label class="form-check-label">Speak detected objects</label>
+    </div>
+
+    <button id="switchCamBtn" class="btn btn-sm btn-outline-primary ms-auto">
+        Switch Camera
+    </button>
 </div>
 
 <div id="cameraWrapper">
@@ -132,28 +137,53 @@ class LiveDetectionApp {
         this.text = document.getElementById("descriptionText");
         this.resultBox = document.getElementById("resultBox");
         this.ttsToggle = document.getElementById("ttsToggle");
+        this.switchBtn = document.getElementById("switchCamBtn");
 
         this.model = null;
         this.stream = null;
         this.lastSpoken = "";
+        this.facingMode = "user"; // user = front, environment = back
     }
 
     async init() {
         this.hint.textContent = "Loading AI model…";
         this.model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
-        this.hint.textContent = "Opening camera…";
+
+        this.switchBtn.onclick = () => this.switchCamera();
+
         await this.startCamera();
         this.hint.textContent = "Live detection running";
         this.detectLoop();
     }
 
     async startCamera() {
-        this.stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+        }
+
+        this.stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: this.facingMode }
+        });
+
         this.video.srcObject = this.stream;
         await new Promise(r => this.video.onloadedmetadata = r);
 
         this.overlay.width = this.video.videoWidth;
         this.overlay.height = this.video.videoHeight;
+
+        // mirror only front cam
+        this.video.style.transform =
+            this.facingMode === "user" ? "scaleX(-1)" : "scaleX(1)";
+    }
+
+    async switchCamera() {
+        this.facingMode =
+            this.facingMode === "user" ? "environment" : "user";
+
+        this.hint.textContent =
+            this.facingMode === "user" ? "Front camera" : "Back camera";
+
+        await this.startCamera();
     }
 
     async detectLoop() {
@@ -174,10 +204,16 @@ class LiveDetectionApp {
         this.ctx.font = "bold 14px Arial";
 
         predictions.forEach(p => {
-            const [x, y, w, h] = p.bbox;
+            let [x, y, w, h] = p.bbox;
+
+            // Fix mirror for front cam
+            if (this.facingMode === "user") {
+                x = this.overlay.width - x - w;
+            }
+
             this.ctx.strokeRect(x, y, w, h);
 
-            const label = `${p.class} ${(p.score*100).toFixed(0)}%`;
+            const label = `${p.class} ${(p.score * 100).toFixed(0)}%`;
             const tw = this.ctx.measureText(label).width;
 
             this.ctx.fillStyle = "#00E5FF";
